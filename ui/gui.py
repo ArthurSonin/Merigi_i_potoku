@@ -1,5 +1,7 @@
+import sys
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from algorithms.minty import solve_minty
@@ -7,6 +9,7 @@ from config import EDGES as DEFAULT_EDGES, START_NODE as DEFAULT_START
 from visualization.graph_drawer import build_figure
 from utils.file_parser import parse_edges_from_file
 from ui.about_dialog import AboutDialog
+from ui.guide_dialog import GuideDialog
 
 
 class App(tk.Tk):
@@ -15,10 +18,11 @@ class App(tk.Tk):
         self.title("Метод Мінті — Найкоротші шляхи")
         self.geometry("1000x650")
 
+        self.protocol("WM_DELETE_WINDOW", self.on_exit)
+
         self.canvas_widget = None
         self.current_source_name = "Тестові дані"
         
-        # Змінні для трекінгу перетягування мишею
         self.pan_start_x = None
         self.pan_start_y = None
         
@@ -30,10 +34,26 @@ class App(tk.Tk):
         left_frame = ttk.Frame(self, padding=10)
         left_frame.pack(side=tk.LEFT, fill=tk.Y)
 
-        ttk.Label(left_frame, text="Початкова вершина:").pack(anchor=tk.W)
-        self.start_entry = ttk.Entry(left_frame, width=10)
-        self.start_entry.pack(anchor=tk.W, pady=(0, 10))
+        # Блок: Початкова вершина + Кнопки дій в один рядок
+        input_frame = ttk.Frame(left_frame)
+        input_frame.pack(fill=tk.X, pady=(0, 10))
 
+        # Ліва частина блоку (Label + Entry)
+        start_subframe = ttk.Frame(input_frame)
+        start_subframe.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 10))
+
+        ttk.Label(start_subframe, text="Початкова вершина:").pack(anchor=tk.W)
+        self.start_entry = ttk.Entry(start_subframe, width=8)
+        self.start_entry.pack(anchor=tk.W, pady=(2, 0))
+
+        # Права частина блоку (Кнопки у зазначеній зоні)
+        action_btn_frame = ttk.Frame(input_frame)
+        action_btn_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Button(action_btn_frame, text="Завантажити з файлу", command=self.load_from_file).pack(fill=tk.X, pady=1)
+        ttk.Button(action_btn_frame, text="Розрахувати (Мінті)", command=self.calculate).pack(fill=tk.X, pady=1)
+
+        # Текстове поле для дуг
         ttk.Label(left_frame, text="Дуги (звідки куди вага):").pack(anchor=tk.W)
         self.edges_text = tk.Text(left_frame, width=32, height=12)
         self.edges_text.pack(pady=(0, 5))
@@ -41,26 +61,34 @@ class App(tk.Tk):
         self.file_label = ttk.Label(left_frame, text="Джерело: Тестові дані", font=("Arial", 8, "italic"), foreground="gray")
         self.file_label.pack(anchor=tk.W, pady=(0, 10))
 
-        # Панель кнопок
-        btn_frame = ttk.Frame(left_frame)
-        btn_frame.pack(fill=tk.X, pady=(0, 10))
+        # Системні кнопки
+        bottom_btn_frame = ttk.Frame(left_frame)
+        bottom_btn_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(btn_frame, text="Розрахувати", command=self.calculate).pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame, text="Завантажити з файлу", command=self.load_from_file).pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame, text="Тестові дані", command=self._load_default_data).pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame, text="Про програму", command=self.show_about_dialog).pack(fill=tk.X, pady=(10, 2))
+        ttk.Button(bottom_btn_frame, text="Інструкція", command=self.show_guide_dialog).pack(fill=tk.X, pady=2)
+        ttk.Button(bottom_btn_frame, text="Про програму", command=self.show_about_dialog).pack(fill=tk.X, pady=2)
 
         # Результати
         ttk.Label(left_frame, text="Результати:").pack(anchor=tk.W, pady=(5, 0))
         self.result_text = tk.Text(left_frame, width=32, height=7, state=tk.DISABLED)
         self.result_text.pack(fill=tk.BOTH, expand=True)
 
-        # Права панель
+        # Права панель для графа
         self.right_frame = ttk.Frame(self, padding=10)
         self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+    def on_exit(self):
+        if messagebox.askokcancel("Вихід", "Ви дійсно бажаєте вийти з програми?"):
+            plt.close('all')
+            self.quit()
+            self.destroy()
+            sys.exit(0)
+
     def show_about_dialog(self):
         AboutDialog(self)
+
+    def show_guide_dialog(self):
+        GuideDialog(self)
 
     def _load_default_data(self):
         self.start_entry.delete(0, tk.END)
@@ -93,12 +121,7 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Помилка файлу", str(e))
 
-    # --- Логіка вбудованого керування мишею ---
-
     def _setup_mouse_navigation(self, canvas, fig, ax):
-        """Підключає події миші для панорамування, зумування та скидання масштабу."""
-        
-        # 1. Зум коліщатком миші
         def on_scroll(event):
             base_scale = 1.2
             cur_xlim = ax.get_xlim()
@@ -122,9 +145,8 @@ class App(tk.Tk):
                 ax.set_ylim([event.ydata - new_height * (1 - rely), event.ydata + new_height * rely])
                 canvas.draw_idle()
 
-        # 2. Перетягування графа (Панорама)
         def on_press(event):
-            if event.button == 1 and event.inaxes == ax:  # Ліва кнопка миші
+            if event.button == 1 and event.inaxes == ax:
                 self.pan_start_x = event.xdata
                 self.pan_start_y = event.ydata
 
@@ -147,8 +169,6 @@ class App(tk.Tk):
                 self.pan_start_x = None
                 self.pan_start_y = None
 
-        # 3. Скидання вигляду за подвійним кліком
-        # Зберігаємо початкові межі осей для скидання
         initial_xlim = ax.get_xlim()
         initial_ylim = ax.get_ylim()
 
@@ -158,7 +178,6 @@ class App(tk.Tk):
                 ax.set_ylim(initial_ylim)
                 canvas.draw_idle()
 
-        # Зв'язуємо події Matplotlib з обробниками
         fig.canvas.mpl_connect('scroll_event', on_scroll)
         fig.canvas.mpl_connect('button_press_event', on_press)
         fig.canvas.mpl_connect('motion_notify_event', on_motion)
@@ -197,7 +216,6 @@ class App(tk.Tk):
 
         h, shortest_edges, _ = solve_minty(edges, start_node=start_node)
 
-        # Результати
         self.result_text.config(state=tk.NORMAL)
         self.result_text.delete("1.0", tk.END)
         self.result_text.insert(tk.END, f"Джерело: {self.current_source_name}\n")
@@ -210,7 +228,6 @@ class App(tk.Tk):
             self.result_text.insert(tk.END, f"  {u} -> {v}\n")
         self.result_text.config(state=tk.DISABLED)
 
-        # Очищення полотна
         if self.canvas_widget:
             self.canvas_widget.destroy()
 
