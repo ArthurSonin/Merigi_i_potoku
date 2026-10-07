@@ -6,7 +6,7 @@ class AboutDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Про програму")
-        self.geometry("380x260")
+        self.geometry("420x340")
         self.resizable(False, False)
 
         # Робимо вікно модальним (блокує головне вікно до закриття)
@@ -19,17 +19,26 @@ class AboutDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Заголовок
+        # Заголовок програми
         title_label = ttk.Label(
             frame, 
             text="Minty Graph Solver", 
-            font=("Arial", 10, "bold"),
-            wraplength=340,
+            font=("Arial", 12, "bold"),
+            wraplength=380,
             justify=tk.CENTER
         )
-        title_label.pack(pady=(0, 10))
+        title_label.pack(pady=(0, 2))
 
-        # Опис додатку
+        # Версія
+        version_label = ttk.Label(
+            frame,
+            text="Версія: 0.4",
+            font=("Arial", 9, "bold"),
+            foreground="gray"
+        )
+        version_label.pack(pady=(0, 10))
+
+        # Основний опис
         desc_text = (
             "Програма розроблена в рамках курсового проєкту студентом 3 курсу "
             "групи 341А Чернівецького національного університету імені Юрія Федьковича "
@@ -39,23 +48,17 @@ class AboutDialog(tk.Toplevel):
             "за допомогою алгоритму Мінті, а також автоматична побудова та візуалізація "
             "його планарного представлення."
         )
-        desc_label = ttk.Label(frame, text=desc_text, wraplength=340, justify=tk.LEFT)
+        desc_label = ttk.Label(
+            frame, 
+            text=desc_text, 
+            wraplength=380, 
+            justify=tk.LEFT,
+            font=("Arial", 9)
+        )
         desc_label.pack(pady=(0, 15))
 
-        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
-
-        # Інформація про автора
-        author_info = (
-
-        )
-        author_label = ttk.Label(
-            frame, 
-            text=author_info, 
-            font=("Arial", 9, "italic"), 
-            justify=tk.LEFT
-        )
-        author_label.pack(anchor=tk.W, pady=(0, 15))
+        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 15))
 
         # Кнопка закриття
         close_btn = ttk.Button(frame, text="Закрити", command=self.destroy)
-        close_btn.pack()
+        close_btn.pack(side=tk.BOTTOM)
