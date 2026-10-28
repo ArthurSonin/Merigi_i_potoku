@@ -51,7 +51,7 @@ def save_results_to_file(filepath, source_name, algorithm_name, results_data):
     
     :param filepath: Шлях до файлу для збереження
     :param source_name: Назва вхідного файлу/джерела даних
-    :param algorithm_name: Назва виконаного алгоритму (наприклад, "Алгоритм Мінті")
+    :param algorithm_name: Назва виконаного алгоритму (наприклад, "Алгоритм Форда-Фалкерсона")
     :param results_data: Рядок або список рядків із результатами
     """
     directory = os.path.dirname(filepath)
