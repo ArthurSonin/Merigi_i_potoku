@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from algorithms.minty import solve_minty
-from config import EDGES as DEFAULT_EDGES, START_NODE as DEFAULT_START
-from visualization.graph_drawer import build_figure
+from algorithms.ford_fulkerson import solve_ford_fulkerson, add_super_nodes
+from visualization.graph_drawer import build_figure, build_flow_figure, compute_layout
 from utils.file_parser import parse_edges_from_file, save_edges_to_file, save_results_to_file
 from utils.helpers import resource_path
 from ui.about_dialog import AboutDialog
@@ -17,7 +17,7 @@ from ui.guide_dialog import GuideDialog
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Minty Graph Solver")
+        self.title("Ultimate Flow Solver")
         self.geometry("1000x680")
 
         try:
@@ -41,6 +41,9 @@ class App(tk.Tk):
         self.last_h = None
         self.last_shortest_edges = None
         self.last_start_node = None
+
+        self.last_algorithm_name = "Алгоритм Мінті"
+        self.last_flow_result = None   # результат Форда-Фалкерсона для перемальовування
         
         self._setup_ui()
 
@@ -48,27 +51,43 @@ class App(tk.Tk):
         left_frame = ttk.Frame(self, padding=10)
         left_frame.pack(side=tk.LEFT, fill=tk.Y)
 
+        ttk.Label(left_frame, text="Алгоритм:").pack(anchor=tk.W)
+        self.algorithm_cb = ttk.Combobox(
+            left_frame, state="readonly",
+            values=["Мінті (найкоротші шляхи)", "Форд-Фалкерсон (максимальний потік)"]
+        )
+        self.algorithm_cb.current(0)
+        self.algorithm_cb.bind("<<ComboboxSelected>>", lambda e: self.on_algorithm_change())
+        self.algorithm_cb.pack(fill=tk.X, pady=(2, 8))
+
         input_frame = ttk.Frame(left_frame)
         input_frame.pack(fill=tk.X, pady=(0, 10))
 
         start_subframe = ttk.Frame(input_frame)
         start_subframe.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 10))
 
-        ttk.Label(start_subframe, text="Початкова вершина:").pack(anchor=tk.W)
-        self.start_entry = ttk.Entry(start_subframe, width=8)
+        self.start_label = ttk.Label(start_subframe, text="Початкова вершина:")
+        self.start_label.pack(anchor=tk.W)
+        self.start_entry = ttk.Entry(start_subframe, width=14)
         self.start_entry.pack(anchor=tk.W, pady=(2, 0))
+
+        self.sink_label = ttk.Label(start_subframe, text="Стік (витік):")
+        self.sink_label.pack(anchor=tk.W, pady=(4, 0))
+        self.sink_entry = ttk.Entry(start_subframe, width=14, state=tk.DISABLED)
+        self.sink_entry.pack(anchor=tk.W, pady=(2, 0))
 
         action_btn_frame = ttk.Frame(input_frame)
         action_btn_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         ttk.Button(action_btn_frame, text="Завантажити з файлу", command=self.load_from_file).pack(fill=tk.X, pady=1)
-        ttk.Button(action_btn_frame, text="Розрахувати (Мінті)", command=self.calculate).pack(fill=tk.X, pady=1)
+        self.calc_btn = ttk.Button(action_btn_frame, text="Розрахувати (Мінті)", command=self.calculate)
+        self.calc_btn.pack(fill=tk.X, pady=1)
 
         ttk.Button(left_frame, text="Зберегти граф", command=self.save_to_file).pack(fill=tk.X, pady=1)
         ttk.Button(left_frame, text="Зберегти результати", command=self.save_results).pack(fill=tk.X, pady=1)
 
         ttk.Label(left_frame, text="Дуги (звідки куди вага):").pack(anchor=tk.W, pady=(5, 0))
-        self.edges_text = tk.Text(left_frame, width=32, height=9)
+        self.edges_text = tk.Text(left_frame, width=32, height=4)
         self.edges_text.pack(pady=(0, 5))
 
         self.file_label = ttk.Label(left_frame, text="Джерело: Тестові дані", font=("Arial", 8, "italic"), foreground="gray")
@@ -96,7 +115,18 @@ class App(tk.Tk):
         )
         self.chk_show_blue.pack(anchor=tk.W, pady=1)
 
-        ttk.Label(view_frame, text="Цільова вершина (фіолетовий шлях):").pack(anchor=tk.W, pady=(5, 2))
+        self.show_cut_var = tk.BooleanVar(value=True)
+        self.chk_show_cut = ttk.Checkbutton(
+            view_frame,
+            text="Мінімальний переріз (червоні дуги)",
+            variable=self.show_cut_var,
+            command=self.draw_flow_display,
+            state=tk.DISABLED
+        )
+        self.chk_show_cut.pack(anchor=tk.W, pady=1)
+
+        self.target_label = ttk.Label(view_frame, text="Цільова вершина (фіолетовий шлях):")
+        self.target_label.pack(anchor=tk.W, pady=(5, 2))
         self.target_node_cb = ttk.Combobox(view_frame, state="readonly")
         self.target_node_cb.bind("<<ComboboxSelected>>", lambda e: self.update_graph_display())
         self.target_node_cb.pack(fill=tk.X, pady=2)
@@ -227,7 +257,8 @@ class App(tk.Tk):
         AboutDialog(self)
 
     def show_guide_dialog(self):
-        GuideDialog(self)
+        mode = "flow" if self._is_flow_mode() else "minty"
+        GuideDialog(self, mode)
 
     def load_from_file(self):
         filepath = filedialog.askopenfilename(
@@ -300,7 +331,7 @@ class App(tk.Tk):
             filename = save_results_to_file(
                 filepath=filepath,
                 source_name=source,
-                algorithm_name="Алгоритм Мінті",
+                algorithm_name=self.last_algorithm_name,
                 results_data=results_text
             )
             messagebox.showinfo("Успіх", f"Результати успішно збережено у файл '{filename}'!")
@@ -432,6 +463,13 @@ class App(tk.Tk):
         canvas.draw()
 
     def calculate(self):
+        if self._is_flow_mode():
+            self.calculate_flow()
+        else:
+            self.calculate_minty()
+
+    def calculate_minty(self):
+        self.last_algorithm_name = "Алгоритм Мінті"
         try:
             start_node = int(self.start_entry.get().strip())
         except ValueError:
@@ -523,6 +561,191 @@ class App(tk.Tk):
 
         # Відображення графа
         self.update_graph_display()
+
+
+    # ------------------------------------------------------------------
+    #  Максимальний потік (алгоритм Форда-Фалкерсона)
+    # ------------------------------------------------------------------
+    def _is_flow_mode(self):
+        return self.algorithm_cb.current() == 1
+
+    def on_algorithm_change(self):
+        """Перемикає підписи й доступність елементів залежно від алгоритму."""
+        if self._is_flow_mode():
+            self.start_label.config(text="Джерела (через кому):")
+            self.sink_label.config(text="Стоки (через кому):")
+            self.sink_entry.config(state=tk.NORMAL)
+            self.calc_btn.config(text="Розрахувати (Форд-Фалкерсон)")
+            for w in (self.chk_show_red, self.chk_show_blue):
+                w.state(["disabled"])
+            self.target_node_cb.config(state=tk.DISABLED)
+            self.chk_show_cut.state(["!disabled"])
+        else:
+            self.start_label.config(text="Початкова вершина:")
+            self.sink_label.config(text="Стік (витік):")
+            self.sink_entry.config(state=tk.DISABLED)
+            self.calc_btn.config(text="Розрахувати (Мінті)")
+            for w in (self.chk_show_red, self.chk_show_blue):
+                w.state(["!disabled"])
+            self.target_node_cb.config(state="readonly")
+            self.chk_show_cut.state(["disabled"])
+
+    def calculate_flow(self):
+        self.last_algorithm_name = "Алгоритм Форда-Фалкерсона"
+        try:
+            sources = [int(t) for t in self.start_entry.get().replace(",", " ").split()]
+            sinks = [int(t) for t in self.sink_entry.get().replace(",", " ").split()]
+        except ValueError:
+            messagebox.showerror("Помилка", "Джерела і стоки мають бути цілими числами (через кому або пропуск)!")
+            return
+        if not sources or not sinks:
+            messagebox.showerror("Помилка", "Вкажіть хоча б одне джерело і хоча б один стік!")
+            return
+
+        edges = []
+        for line in self.edges_text.get("1.0", tk.END).strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) != 3:
+                messagebox.showerror("Помилка", f"Некоректний рядок дуги: '{line}'\nФормат: звідки куди пропускна_здатність")
+                return
+            try:
+                u, v = int(parts[0]), int(parts[1])
+                c = float(parts[2])
+                if c.is_integer():
+                    c = int(c)
+                edges.append((u, v, c))
+            except ValueError:
+                messagebox.showerror("Помилка", f"Некоректні значення в рядку: '{line}'")
+                return
+
+        if not edges:
+            messagebox.showerror("Помилка", "Введіть або завантажте хоча б одну дугу!")
+            return
+
+        real_edges = edges
+        try:
+            # кілька джерел/стоків -> додаємо фіктивні S і T (якщо по одному - нічого не змінюється)
+            edges, source, sink, fake = add_super_nodes(real_edges, sources, sinks)
+            result = solve_ford_fulkerson(edges, source, sink)
+        except ValueError as e:
+            messagebox.showerror("Помилка", str(e))
+            return
+
+        pos, crossings, is_planar = compute_layout(edges, source, sink)
+
+        self.last_flow_result = {
+            "edges": edges, "source": source, "sink": sink, "result": result,
+            "pos": pos, "crossings": crossings, "is_planar": is_planar,
+            "sources": sources, "sinks": sinks, "fake": fake,
+        }
+        self._update_flow_report()
+        self.draw_flow_display()
+
+    @staticmethod
+    def _fmt_num(x):
+        return int(x) if float(x).is_integer() else round(x, 4)
+
+    def _update_flow_report(self):
+        data = self.last_flow_result
+        if not data:
+            return
+        edges, source, sink, res = data["edges"], data["source"], data["sink"], data["result"]
+        f = self._fmt_num
+
+        report = []
+        report.append("=== РЕЗУЛЬТАТИ ОБЧИСЛЕННЯ (ФОРД-ФАЛКЕРСОН) ===")
+        report.append(f"Джерело даних: {self.current_source_name or 'Введено вручну'}")
+        fake = data["fake"]
+        report.append(f"Джерела: {', '.join(map(str, data['sources']))} | "
+                      f"Стоки: {', '.join(map(str, data['sinks']))}")
+        if fake:
+            report.append(f"(службові вершини: S = {source}, T = {sink}; дуги до них мають r = ∞)")
+        report.append(f"МАКСИМАЛЬНИЙ ПОТІК: {f(res['max_flow'])}\n")
+
+        report.append("--- ПОТІК ПО ДУГАХ (x_ij / r_ij) ---")
+        for (u, v, c), x in zip(edges, res["flow"]):
+            if u in fake or v in fake:          # службові дуги показуємо окремо нижче
+                continue
+            mark = "  (насичена)" if x == c and c > 0 else ""
+            report.append(f"  {u}-{v}: {f(x)} / {f(c)}{mark}")
+
+        report.append("\n--- МІНІМАЛЬНИЙ ПЕРЕРІЗ ---")
+        report.append(f"I* = {{{', '.join(map(str, sorted(res['I_star'] - fake)))}}}")
+        cut = ", ".join(f"({u},{v})" for u, v, _ in res["cut_edges"]) or "(порожній)"
+        report.append(f"Дуги перерізу: {{{cut}}}")
+        cut_terms = " + ".join(str(f(c)) for _, _, c in res["cut_edges"]) or "0"
+        report.append(f"Пропускна здатність: {cut_terms} = {f(res['cut_capacity'])}")
+        report.append("Збігається з максимальним потоком (теорема Форда-Фалкерсона)."
+                      if res["cut_capacity"] == res["max_flow"] else "УВАГА: переріз не збігається з потоком!")
+
+        if fake:
+            report.append("\n--- ПОТІК ЧЕРЕЗ ДЖЕРЕЛА І СТОКИ ---")
+            for (u, v, _), x in zip(edges, res["flow"]):
+                if u == source:
+                    report.append(f"  джерело {v} віддає: {f(x)}")
+            for (u, v, _), x in zip(edges, res["flow"]):
+                if v == sink:
+                    report.append(f"  стік {u} приймає: {f(x)}")
+
+        report.append("\n--- МАЛЮНОК ---")
+        if data["crossings"] == 0:
+            report.append("Перетинів дуг немає.")
+        elif data["is_planar"]:
+            report.append(f"Перетинів дуг: {data['crossings']}.")
+        else:
+            report.append(f"Перетинів дуг: {data['crossings']}. Мережа непланарна "
+                          f"(містить K5 або K3,3), тому повністю уникнути\n"
+                          f"перетинів неможливо; вершини розташовано з мінімумом перетинів.")
+
+        report.append("\n--- ХІД РОЗВ'ЯЗАННЯ (ІТЕРАЦІЇ) ---")
+        iters = res["iterations"]
+        for k, it in enumerate(iters, 1):
+            labels = ", ".join(
+                f"{n}(0,∞)" if n == source else f"{n}({f_n},{f(th)})"
+                for n, (f_n, th) in it["labels"].items()
+            )
+            report.append(f"Ітерація {k}. Позначки: {labels}")
+            if it["path"]:
+                path = " -> ".join(map(str, it["path"]))
+                report.append(f"  Ланцюг: {path}; θ = {f(it['theta'])}; потік = {f(it['value_after'])}")
+            else:
+                report.append(f"  Стік не позначено - потік максимальний ({f(it['value_after'])}).")
+
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete("1.0", tk.END)
+        self.result_text.insert(tk.END, "\n".join(report))
+        self.result_text.config(state=tk.DISABLED)
+
+    def draw_flow_display(self):
+        data = self.last_flow_result
+        if not data or not self._is_flow_mode():
+            return
+        res = data["result"]
+
+        if self.canvas_widget:
+            self.canvas_widget.destroy()
+        plt.close('all')
+
+        title = (f"Максимальний потік = {self._fmt_num(res['max_flow'])} "
+                 f"(джерела {', '.join(map(str, data['sources']))}, "
+                 f"стоки {', '.join(map(str, data['sinks']))}) | Файл: {self.current_source_name}")
+        fig = build_flow_figure(
+            edges=data["edges"], flow=res["flow"],
+            source=data["source"], sink=data["sink"],
+            I_star=res["I_star"], cut_edges=res["cut_edges"],
+            pos=data["pos"], title=title, show_cut=self.show_cut_var.get(),
+            fake_nodes=data["fake"]
+        )
+        ax = fig.gca()
+
+        canvas = FigureCanvasTkAgg(fig, master=self.right_frame)
+        self._setup_mouse_navigation(canvas, fig, ax)
+
+        self.canvas_widget = canvas.get_tk_widget()
+        self.canvas_widget.pack(fill=tk.BOTH, expand=True)
+        canvas.draw()
 
 
 def run_app():

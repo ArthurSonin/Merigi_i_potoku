@@ -22,7 +22,7 @@ class AboutDialog(tk.Toplevel):
         # Заголовок програми
         title_label = ttk.Label(
             frame, 
-            text="Minty Graph Solver", 
+            text="Ultimate Flow Solver", 
             font=("Arial", 12, "bold"),
             wraplength=380,
             justify=tk.CENTER
@@ -32,7 +32,7 @@ class AboutDialog(tk.Toplevel):
         # Версія
         version_label = ttk.Label(
             frame,
-            text="Версія: 0.4",
+            text="Версія: 0.7",
             font=("Arial", 9, "bold"),
             foreground="gray"
         )
